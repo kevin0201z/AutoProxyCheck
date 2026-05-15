@@ -5,6 +5,40 @@ $sharedRoot = Join-Path $env:ProgramData "AutoProxyCheck"
 $stopFile = Join-Path $sharedRoot "stop_proxy_checker.flag"
 $statusFile = Join-Path $sharedRoot "proxy_status.json"
 $internetSettingsPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+$mutexName = "Global\AutoProxyCheck.Tray"
+$script:mutexAcquired = $false
+$script:instanceMutex = $null
+
+function Enter-SingleInstanceLock {
+    $script:instanceMutex = New-Object System.Threading.Mutex($false, $mutexName)
+
+    try {
+        $script:mutexAcquired = $script:instanceMutex.WaitOne(0, $false)
+    } catch [System.Threading.AbandonedMutexException] {
+        $script:mutexAcquired = $true
+    }
+
+    if (-not $script:mutexAcquired) {
+        exit 0
+    }
+}
+
+function Exit-SingleInstanceLock {
+    if ($null -ne $script:instanceMutex) {
+        try {
+            if ($script:mutexAcquired) {
+                $script:instanceMutex.ReleaseMutex()
+            }
+        } catch {
+        } finally {
+            $script:instanceMutex.Dispose()
+            $script:instanceMutex = $null
+            $script:mutexAcquired = $false
+        }
+    }
+}
+
+Enter-SingleInstanceLock
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Visible = $true
@@ -95,6 +129,10 @@ $exitItem.Add_Click({
 })
 
 $notifyIcon.ContextMenuStrip = $menu
+
+[System.Windows.Forms.Application]::Add_ApplicationExit({
+    Exit-SingleInstanceLock
+})
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
