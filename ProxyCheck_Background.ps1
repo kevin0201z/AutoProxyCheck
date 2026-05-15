@@ -140,26 +140,50 @@ function Set-ProxyEnabled {
         [int]$Enabled
     )
 
-    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value $Enabled
-    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value $winHttpProxy
-    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value $proxyBypass
-    Set-ItemProperty -Path $machineInternetSettingsPath -Name MigrateProxy -Value 1 -ErrorAction SilentlyContinue
-    Sync-WinHttpProxy -Enabled $Enabled
+    try {
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value $Enabled
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value $winHttpProxy
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value $proxyBypass
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name MigrateProxy -Value 1 -ErrorAction SilentlyContinue
+        Sync-WinHttpProxy -Enabled $Enabled
+        Invoke-ProxyRefresh
+        Assert-ProxyState -Enabled $Enabled
+    } catch {
+        if ($Enabled -eq 1) {
+            try {
+                Set-ProxyDirect
+            } catch {
+            }
+        }
+
+        throw
+    }
+}
+
+function Set-ProxyDirect {
+    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value 0
+    Sync-WinHttpProxy -Enabled 0
     Invoke-ProxyRefresh
-    Assert-ProxyState -Enabled $Enabled
+}
+
+function Restore-PerUserProxySettings {
+    Set-ItemProperty -Path $policyPath -Name ProxySettingsPerUser -Type DWord -Value 1
+    Invoke-ProxyRefresh
 }
 
 function Invoke-Netsh {
     param(
         [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+
+        [bool]$AllowNonZeroExit = $false
     )
 
     $output = & netsh @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     $combinedOutput = ($output | Out-String).Trim()
 
-    if ($exitCode -ne 0) {
+    if (($exitCode -ne 0) -and (-not $AllowNonZeroExit)) {
         throw "netsh failed with exit code $exitCode. Output: $combinedOutput"
     }
 
@@ -175,9 +199,10 @@ function Sync-WinHttpProxy {
 
     if ($Enabled -eq 1) {
         $settings = '{"Proxy":"' + $winHttpProxy + '","ProxyBypass":"' + $proxyBypass + '","AutoconfigUrl":"","AutoDetect":false}'
-        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings"))
+        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings") -AllowNonZeroExit $true)
     } else {
-        [void](Invoke-Netsh -Arguments @("winhttp", "reset", "proxy"))
+        $settings = '{"Proxy":"","ProxyBypass":"","AutoconfigUrl":"","AutoDetect":false}'
+        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings") -AllowNonZeroExit $true)
     }
 }
 
@@ -204,14 +229,14 @@ function Assert-ProxyState {
             throw "ProxyOverride verification failed. Expected '$proxyBypass' but found '$($currentSettings.ProxyOverride)'."
         }
 
-        $winHttpOutput = Invoke-Netsh -Arguments @("winhttp", "show", "advproxy", "setting-scope=machine")
+        $winHttpOutput = Invoke-Netsh -Arguments @("winhttp", "show", "advproxy")
         if (($winHttpOutput -notmatch [regex]::Escape($winHttpProxy)) -or ($winHttpOutput -notmatch [regex]::Escape($proxyBypass))) {
             throw "WinHTTP verification failed for enabled state. Output: $winHttpOutput"
         }
     } else {
-        $winHttpOutput = Invoke-Netsh -Arguments @("winhttp", "show", "proxy")
-        if ($winHttpOutput -match [regex]::Escape($winHttpProxy)) {
-            throw "WinHTTP verification failed for disabled state. Output still references '$winHttpProxy'."
+        $winHttpOutput = Invoke-Netsh -Arguments @("winhttp", "show", "advproxy")
+        if ($winHttpOutput -match '"ProxyIsEnabled"\s*:\s*true') {
+            throw "WinHTTP verification failed for disabled state. Output: $winHttpOutput"
         }
     }
 }
@@ -259,8 +284,9 @@ try {
         if (Test-Path -LiteralPath $stopFile) {
             Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
             Set-ProxyEnabled -Enabled 0
+            Restore-PerUserProxySettings
             $currentProxyEnabled = 0
-            Write-StatusFile -ProxyReachable $false -ProxyEnabled $currentProxyEnabled -BackgroundRunning $false -Message "Background stopped, proxy disabled"
+            Write-StatusFile -ProxyReachable $false -ProxyEnabled $currentProxyEnabled -BackgroundRunning $false -Message "Background stopped, proxy disabled, per-user proxy settings restored"
             break
         }
 
