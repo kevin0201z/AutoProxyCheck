@@ -10,7 +10,7 @@
 
 历史草案位于：
 
-- `草稿/`
+- `draft/`
 
 ## 2. 部署前准备
 
@@ -40,7 +40,7 @@
 - `C:\ProgramData\AutoProxyCheck\stop_proxy_checker.flag`
 - `C:\ProgramData\AutoProxyCheck\proxy_status.json`
 
-后台脚本首次启动时会自动创建该目录。
+后台脚本首次启动时会自动创建该目录。  
 后台脚本会自动为该目录设置共享访问权限，使 `SYSTEM`、管理员和普通登录用户都能完成状态读写与停止信号写入。
 
 ## 4. 计划任务方案
@@ -158,5 +158,5 @@ powershell.exe -ExecutionPolicy Bypass -File ".\ProxyTray_UI.ps1"
 New-Item -Path "C:\ProgramData\AutoProxyCheck\stop_proxy_checker.flag" -ItemType File -Force
 ```
 
-后台脚本会在下一轮检测时读取到停止信号并退出。
+后台脚本会在下一轮检测时读取到停止信号并退出。  
 在退出前，后台脚本会自动关闭机器级代理并切换到直连。

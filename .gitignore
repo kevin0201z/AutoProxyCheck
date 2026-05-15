@@ -1,0 +1,13 @@
+# Historical drafts
+draft/
+
+# Windows / editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+
+# Local test artifacts
+*.log
+*.tmp
+*.bak
