@@ -36,9 +36,12 @@
 
 - `C:\ProgramData\AutoProxyCheck\stop_proxy_checker.flag`
 - `C:\ProgramData\AutoProxyCheck\proxy_status.json`
+- `C:\ProgramData\AutoProxyCheck\AutoProxyCheck.log`
 
 后台脚本首次启动时会自动创建该目录。  
 后台脚本会自动为该目录设置共享访问权限，使 `SYSTEM`、管理员和普通登录用户都能完成状态读写与停止信号写入。
+后台脚本、托盘脚本和恢复脚本会把启动、退出、代理切换、错误等信息写入 `AutoProxyCheck.log`。
+日志文件超过 1 MB 后会自动轮转为 `AutoProxyCheck.log.old`。
 
 本工具按单用户电脑场景设计：当前登录用户被视为可信用户。共享目录允许普通用户写入停止信号，因此不适合直接部署到多用户共用、需要隔离普通用户权限的机器上。
 
@@ -139,6 +142,12 @@ Get-Content "C:\ProgramData\AutoProxyCheck\proxy_status.json"
 
 ```powershell
 netsh winhttp show advproxy
+```
+
+查看运行日志：
+
+```powershell
+Get-Content "C:\ProgramData\AutoProxyCheck\AutoProxyCheck.log" -Tail 50
 ```
 
 ### 7.3 手动运行托盘脚本

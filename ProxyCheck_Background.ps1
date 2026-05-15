@@ -6,6 +6,8 @@ $proxyBypass = "<local>;localhost;127.0.0.1;10.*;172.16.*;172.17.*;172.18.*;172.
 $sharedRoot = Join-Path $env:ProgramData "AutoProxyCheck"
 $stopFile = Join-Path $sharedRoot "stop_proxy_checker.flag"
 $statusFile = Join-Path $sharedRoot "proxy_status.json"
+$logFile = Join-Path $sharedRoot "AutoProxyCheck.log"
+$maxLogBytes = 1048576
 $policyPath = "HKLM:\Software\Policies\Microsoft\Windows\CurrentVersion\Internet Settings"
 $machineInternetSettingsPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
 $winHttpProxy = "$proxyHost`:$proxyPort"
@@ -28,6 +30,30 @@ function Get-ProxyEnabled {
         return [int](Get-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -ErrorAction Stop).ProxyEnable
     } catch {
         return 0
+    }
+}
+
+function Write-Log {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$Level = "INFO"
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $sharedRoot)) {
+            New-Item -Path $sharedRoot -ItemType Directory -Force | Out-Null
+        }
+
+        if ((Test-Path -LiteralPath $logFile) -and ((Get-Item -LiteralPath $logFile).Length -ge $maxLogBytes)) {
+            Move-Item -LiteralPath $logFile -Destination "$logFile.old" -Force
+        }
+
+        $timestamp = (Get-Date).ToString("o")
+        Add-Content -LiteralPath $logFile -Encoding UTF8 -Value "$timestamp [$Level] [Background] $Message"
+    } catch {
     }
 }
 
@@ -55,6 +81,7 @@ function Enter-SingleInstanceLock {
     }
 
     if (-not $script:mutexAcquired) {
+        Write-Log -Level "WARN" -Message "Another background instance is already running; exiting."
         throw "Another background instance is already running."
     }
 }
@@ -126,6 +153,7 @@ function Initialize-Environment {
     Set-ItemProperty -Path $policyPath -Name ProxySettingsPerUser -Type DWord -Value 0
     Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value $winHttpProxy
     Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value $proxyBypass
+    Write-Log -Message "Environment initialized. Proxy=$winHttpProxy"
 }
 
 function Invoke-ProxyRefresh {
@@ -141,6 +169,7 @@ function Set-ProxyEnabled {
     )
 
     try {
+        Write-Log -Message "Setting proxy enabled state to $Enabled."
         Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value $Enabled
         Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value $winHttpProxy
         Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value $proxyBypass
@@ -148,7 +177,9 @@ function Set-ProxyEnabled {
         Sync-WinHttpProxy -Enabled $Enabled
         Invoke-ProxyRefresh
         Assert-ProxyState -Enabled $Enabled
+        Write-Log -Message "Proxy enabled state verified as $Enabled."
     } catch {
+        Write-Log -Level "ERROR" -Message "Failed to set proxy enabled state to $Enabled. $($_.Exception.Message)"
         if ($Enabled -eq 1) {
             try {
                 Set-ProxyDirect
@@ -164,11 +195,13 @@ function Set-ProxyDirect {
     Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value 0
     Sync-WinHttpProxy -Enabled 0
     Invoke-ProxyRefresh
+    Write-Log -Message "Proxy rolled back to direct mode."
 }
 
 function Restore-PerUserProxySettings {
     Set-ItemProperty -Path $policyPath -Name ProxySettingsPerUser -Type DWord -Value 1
     Invoke-ProxyRefresh
+    Write-Log -Message "Per-user proxy settings restored."
 }
 
 function Invoke-Netsh {
@@ -272,16 +305,19 @@ function Write-StatusFile {
     }
 
     $status | ConvertTo-Json | Set-Content -LiteralPath $statusFile -Encoding UTF8
+    Write-Log -Message $Message
 }
 
 try {
     Test-Configuration
     Enter-SingleInstanceLock
     Initialize-Environment
+    Write-Log -Message "Background started."
     Write-StatusFile -ProxyReachable $false -ProxyEnabled (Get-ProxyEnabled) -BackgroundRunning $true -Message "Background started (machine-wide proxy mode)"
 
     while ($true) {
         if (Test-Path -LiteralPath $stopFile) {
+            Write-Log -Message "Stop signal detected."
             Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
             Set-ProxyEnabled -Enabled 0
             Restore-PerUserProxySettings
@@ -312,6 +348,7 @@ try {
         Start-Sleep -Seconds $checkIntervalSeconds
     }
 } catch {
+    Write-Log -Level "ERROR" -Message ("Background error: " + $_.Exception.Message)
     if (Test-Path -LiteralPath $sharedRoot) {
         try {
             Write-StatusFile -ProxyReachable $false -ProxyEnabled (Get-ProxyEnabled) -BackgroundRunning $false -Message ("Error: " + $_.Exception.Message)
