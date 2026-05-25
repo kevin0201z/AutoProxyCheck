@@ -77,6 +77,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $statusItem = $menu.Items.Add("Loading status...")
 $statusItem.Enabled = $false
 [void]$menu.Items.Add("-")
+$openLogItem = $menu.Items.Add("Open Log")
 $exitItem = $menu.Items.Add("Exit")
 
 function Get-ProxyEnabled {
@@ -134,6 +135,29 @@ function Update-Icon {
     $notifyIcon.Text = $tooltip
     $statusItem.Text = "$tooltip / machine-wide"
 }
+
+$openLogItem.Add_Click({
+    try {
+        if (-not (Test-Path -LiteralPath $sharedRoot)) {
+            New-Item -Path $sharedRoot -ItemType Directory -Force | Out-Null
+        }
+
+        if (-not (Test-Path -LiteralPath $logFile)) {
+            New-Item -Path $logFile -ItemType File -Force | Out-Null
+        }
+
+        Start-Process -FilePath "notepad.exe" -ArgumentList $logFile
+        Write-Log -Message "Log opened from tray."
+    } catch {
+        Write-Log -Level "ERROR" -Message ("Failed to open log file. " + $_.Exception.Message)
+        [System.Windows.Forms.MessageBox]::Show(
+            "Failed to open the log file. " + $_.Exception.Message,
+            "AutoProxyCheck",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+})
 
 $exitItem.Add_Click({
     try {

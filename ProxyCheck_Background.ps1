@@ -134,12 +134,20 @@ function Set-SharedRootAcl {
     Set-Acl -Path $sharedRoot -AclObject $acl
 }
 
+function Clear-StaleStopSignal {
+    if (Test-Path -LiteralPath $stopFile) {
+        Remove-Item -LiteralPath $stopFile -Force -ErrorAction Stop
+        Write-Log -Message "Stale stop signal cleared during startup."
+    }
+}
+
 function Initialize-Environment {
     if (-not (Test-Path -LiteralPath $sharedRoot)) {
         New-Item -Path $sharedRoot -ItemType Directory -Force | Out-Null
     }
 
     Set-SharedRootAcl
+    Clear-StaleStopSignal
 
     if (-not (Test-Path -LiteralPath $policyPath)) {
         New-Item -Path $policyPath -Force | Out-Null
