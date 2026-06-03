@@ -253,6 +253,22 @@ function Invoke-Netsh {
     return $combinedOutput
 }
 
+function Invoke-NetshAdvProxy {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Settings
+    )
+
+    $settingsFile = Join-Path $sharedRoot ("winhttp_advproxy.{0}.json" -f ([guid]::NewGuid().ToString("N")))
+
+    try {
+        $Settings | ConvertTo-Json -Compress | Set-Content -LiteralPath $settingsFile -Encoding ASCII
+        return Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings-file=$settingsFile")
+    } finally {
+        Remove-Item -LiteralPath $settingsFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Sync-WinHttpProxy {
     param(
         [Parameter(Mandatory = $true)]
@@ -261,11 +277,21 @@ function Sync-WinHttpProxy {
     )
 
     if ($Enabled -eq 1) {
-        $settings = '{"Proxy":"' + $winHttpProxy + '","ProxyBypass":"' + $proxyBypass + '","AutoconfigUrl":"","AutoDetect":false}'
-        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings"))
+        $settings = @{
+            Proxy = $winHttpProxy
+            ProxyBypass = $proxyBypass
+            AutoconfigUrl = ""
+            AutoDetect = $false
+        }
+        [void](Invoke-NetshAdvProxy -Settings $settings)
     } else {
-        $settings = '{"Proxy":"","ProxyBypass":"","AutoconfigUrl":"","AutoDetect":false}'
-        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings"))
+        $settings = @{
+            Proxy = ""
+            ProxyBypass = ""
+            AutoconfigUrl = ""
+            AutoDetect = $false
+        }
+        [void](Invoke-NetshAdvProxy -Settings $settings)
     }
 }
 
