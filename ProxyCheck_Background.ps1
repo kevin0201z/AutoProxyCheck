@@ -212,6 +212,28 @@ function Restore-PerUserProxySettings {
     Write-Log -Message "Per-user proxy settings restored."
 }
 
+function Restore-SafeProxyState {
+    try {
+        if (-not (Test-Path -LiteralPath $policyPath)) {
+            New-Item -Path $policyPath -Force | Out-Null
+        }
+
+        if (-not (Test-Path -LiteralPath $machineInternetSettingsPath)) {
+            New-Item -Path $machineInternetSettingsPath -Force | Out-Null
+        }
+
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value 0
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value ""
+        Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value ""
+        Set-ItemProperty -Path $policyPath -Name ProxySettingsPerUser -Type DWord -Value 1
+        Sync-WinHttpProxy -Enabled 0
+        Invoke-ProxyRefresh
+        Write-Log -Message "Safe proxy state restored."
+    } catch {
+        Write-Log -Level "ERROR" -Message ("Failed to restore safe proxy state. " + $_.Exception.Message)
+    }
+}
+
 function Invoke-Netsh {
     param(
         [Parameter(Mandatory = $true)]
@@ -240,10 +262,10 @@ function Sync-WinHttpProxy {
 
     if ($Enabled -eq 1) {
         $settings = '{"Proxy":"' + $winHttpProxy + '","ProxyBypass":"' + $proxyBypass + '","AutoconfigUrl":"","AutoDetect":false}'
-        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings") -AllowNonZeroExit $true)
+        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings"))
     } else {
         $settings = '{"Proxy":"","ProxyBypass":"","AutoconfigUrl":"","AutoDetect":false}'
-        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings") -AllowNonZeroExit $true)
+        [void](Invoke-Netsh -Arguments @("winhttp", "set", "advproxy", "setting-scope=machine", "settings=$settings"))
     }
 }
 
@@ -312,7 +334,9 @@ function Write-StatusFile {
         mode = "machine-wide"
     }
 
-    $status | ConvertTo-Json | Set-Content -LiteralPath $statusFile -Encoding UTF8
+    $tempStatusFile = Join-Path $sharedRoot ("proxy_status.{0}.tmp" -f ([guid]::NewGuid().ToString("N")))
+    $status | ConvertTo-Json | Set-Content -LiteralPath $tempStatusFile -Encoding UTF8
+    Move-Item -LiteralPath $tempStatusFile -Destination $statusFile -Force
     Write-Log -Message $Message
 }
 
@@ -357,6 +381,7 @@ try {
     }
 } catch {
     Write-Log -Level "ERROR" -Message ("Background error: " + $_.Exception.Message)
+    Restore-SafeProxyState
     if (Test-Path -LiteralPath $sharedRoot) {
         try {
             Write-StatusFile -ProxyReachable $false -ProxyEnabled (Get-ProxyEnabled) -BackgroundRunning $false -Message ("Error: " + $_.Exception.Message)

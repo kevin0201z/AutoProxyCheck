@@ -72,13 +72,15 @@ try {
     }
 
     Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyEnable -Value 0
+    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyServer -Value ""
+    Set-ItemProperty -Path $machineInternetSettingsPath -Name ProxyOverride -Value ""
     Set-ItemProperty -Path $policyPath -Name ProxySettingsPerUser -Type DWord -Value 1
     [void](Invoke-Netsh -Arguments @("winhttp", "reset", "proxy"))
     Invoke-ProxyRefresh
-    Write-Log -Message "Restore completed. Machine proxy disabled, per-user proxy settings enabled, WinHTTP proxy reset."
+    Write-Log -Message "Restore completed. Machine proxy disabled, machine proxy values cleared, per-user proxy settings enabled, WinHTTP proxy reset."
 } catch {
     Write-Log -Level "ERROR" -Message ("Restore failed. " + $_.Exception.Message)
     throw
 }
 
-Write-Host "Proxy settings restored. Machine proxy disabled, per-user proxy settings enabled, WinHTTP proxy reset."
+Write-Host "Proxy settings restored. Machine proxy disabled, machine proxy values cleared, per-user proxy settings enabled, WinHTTP proxy reset."
